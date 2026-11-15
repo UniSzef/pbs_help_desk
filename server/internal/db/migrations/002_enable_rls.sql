@@ -1,0 +1,3 @@
+ALTER TABLE "public"."schema_migrations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."users" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."refresh_tokens" ENABLE ROW LEVEL SECURITY;

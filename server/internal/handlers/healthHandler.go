@@ -1,15 +1,21 @@
 package handlers
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 	"time"
 )
+
+// DBPinger verifies database connectivity.
+type DBPinger interface {
+	Ping(ctx context.Context) error
+}
 
 // HealthResponse represents the JSON payload returned by the healthcheck endpoint.
 type HealthResponse struct {
 	Status    string `json:"status"`
 	Service   string `json:"service"`
+	Database  string `json:"database,omitempty"`
 	Timestamp string `json:"timestamp"`
 	Uptime    string `json:"uptime"`
 }
@@ -18,17 +24,19 @@ type HealthResponse struct {
 type HealthHandler struct {
 	serviceName string
 	startedAt   time.Time
+	db          DBPinger
 }
 
 // NewHealthHandler creates a new HealthHandler instance.
-func NewHealthHandler(serviceName string) *HealthHandler {
+func NewHealthHandler(serviceName string, db DBPinger) *HealthHandler {
 	return &HealthHandler{
 		serviceName: serviceName,
 		startedAt:   time.Now().UTC(),
+		db:          db,
 	}
 }
 
-// Check responds with the current operational status of the server.
+// Check responds with the current operational status of the server and database.
 func (h *HealthHandler) Check(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -43,11 +51,17 @@ func (h *HealthHandler) Check(w http.ResponseWriter, r *http.Request) {
 		Uptime:    now.Sub(h.startedAt).Round(time.Second).String(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, "Error encoding response", http.StatusInternalServerError)
-		return
+	if h.db != nil {
+		pingCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := h.db.Ping(pingCtx); err != nil {
+			resp.Status = "degraded"
+			resp.Database = "unreachable"
+			writeJSON(w, http.StatusServiceUnavailable, resp)
+			return
+		}
+		resp.Database = "ok"
 	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

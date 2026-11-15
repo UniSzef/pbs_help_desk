@@ -6,25 +6,44 @@ import (
 	"testing"
 )
 
-func TestCORSMiddleware_Preflight(t *testing.T) {
-	called := false
+func TestCORSMiddleware(t *testing.T) {
+	allowed := []string{"https://helpdesk.pbs.edu.pl"}
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		w.WriteHeader(http.StatusOK)
 	})
+	handler := CORSMiddleware(allowed)(next)
 
-	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
-	rec := httptest.NewRecorder()
+	// 1. Allowed localhost origin with credentials
+	req1 := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req1.Header.Set("Origin", "http://localhost:4200")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
 
-	CORSMiddleware(next).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	if rec1.Header().Get("Access-Control-Allow-Origin") != "http://localhost:4200" {
+		t.Fatalf("expected allowed origin http://localhost:4200, got %q", rec1.Header().Get("Access-Control-Allow-Origin"))
 	}
-	if called {
-		t.Error("expected next handler not to be called on OPTIONS preflight")
+	if rec1.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("expected Access-Control-Allow-Credentials 'true'")
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
-		t.Errorf("expected Access-Control-Allow-Origin '*', got %q", got)
+
+	// 2. Preflight OPTIONS for configured origin
+	req2 := httptest.NewRequest(http.MethodOptions, "/api/auth/login", nil)
+	req2.Header.Set("Origin", "https://helpdesk.pbs.edu.pl")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec2.Code)
+	}
+
+	// 3. Disallowed origin gets no allow-origin header
+	req3 := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req3.Header.Set("Origin", "https://evil.example.com")
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+
+	if rec3.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected empty Access-Control-Allow-Origin for disallowed origin, got %q", rec3.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
 
