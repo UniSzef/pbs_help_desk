@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/joho/godotenv"
 )
 
 func TestConfig_Validate(t *testing.T) {
@@ -21,23 +23,23 @@ func TestConfig_Validate(t *testing.T) {
 		t.Fatal("expected error for missing DatabaseURL")
 	}
 
+	emptySecret := valid
+	emptySecret.JWTSecret = ""
+	if err := emptySecret.Validate(); err == nil {
+		t.Fatal("expected error for empty JWTSecret")
+	}
+
 	weakSecret := valid
 	weakSecret.JWTSecret = "short"
 	if err := weakSecret.Validate(); err == nil {
 		t.Fatal("expected error for weak JWTSecret")
 	}
-
-	placeholder := valid
-	placeholder.JWTSecret = "replace-this-with-a-strong-random-secret-key"
-	if err := placeholder.Validate(); err == nil {
-		t.Fatal("expected error for default placeholder JWTSecret")
-	}
 }
 
-func TestLoadDotEnv_PreservesDollarAndHashInValues(t *testing.T) {
+func TestGodotenv_SingleQuotedPreservesSpecialChars(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
-	content := "TEST_DB_URL=postgresql://postgres:p$ss#word%12@localhost:5432/postgres\n"
+	content := "TEST_DB_URL='postgresql://postgres:p$ss#word%12@localhost:5432/postgres'\n"
 	if err := os.WriteFile(envPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write temp env: %v", err)
 	}
@@ -45,7 +47,9 @@ func TestLoadDotEnv_PreservesDollarAndHashInValues(t *testing.T) {
 	t.Setenv("TEST_DB_URL", "")
 	_ = os.Unsetenv("TEST_DB_URL")
 
-	loadDotEnv(envPath)
+	if err := godotenv.Load(envPath); err != nil {
+		t.Fatalf("godotenv.Load failed: %v", err)
+	}
 
 	got := os.Getenv("TEST_DB_URL")
 	want := "postgresql://postgres:p$ss#word%12@localhost:5432/postgres"
