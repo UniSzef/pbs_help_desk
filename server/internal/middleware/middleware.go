@@ -4,7 +4,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,25 +59,44 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// CORSMiddleware sets Cross-Origin Resource Sharing headers and handles preflight OPTIONS requests.
-func CORSMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
-		if allowedOrigin == "" {
-			allowedOrigin = "*"
+// CORSMiddleware configures Cross-Origin Resource Sharing headers with credentials support for HttpOnly cookies.
+func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin != "" && isAllowedOrigin(origin, allowedOrigins) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token, X-Requested-With")
+			}
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func isAllowedOrigin(origin string, allowedList []string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" {
+		return true
+	}
+	for _, allowed := range allowedList {
+		if allowed == "*" || strings.EqualFold(allowed, origin) || strings.EqualFold(allowed, host) {
+			return true
 		}
-
-		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
+	}
+	return false
 }
 
 // RateLimitMiddleware applies a simple per-IP sliding-window request limit.
